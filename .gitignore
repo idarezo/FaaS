@@ -1,0 +1,8 @@
+node_modules/
+.serverless/
+.dynamodb/
+.env
+*.zip
+dist/
+coverage/
+.nyc_output/

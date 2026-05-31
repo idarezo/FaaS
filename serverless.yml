@@ -1,0 +1,478 @@
+service: faas-events
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'local'}
+  region: ${opt:region, 'eu-central-1'}
+  environment:
+    STAGE: ${self:provider.stage}
+    JWT_SECRET: ${env:JWT_SECRET, 'faas-events-dev-secret-2024'}
+    USERS_TABLE: ${self:service}-users-${self:provider.stage}
+    EVENTS_TABLE: ${self:service}-events-${self:provider.stage}
+    REGISTRATIONS_TABLE: ${self:service}-registrations-${self:provider.stage}
+    ANALYTICS_TABLE: ${self:service}-analytics-${self:provider.stage}
+    NOTIFICATIONS_TABLE: ${self:service}-notifications-${self:provider.stage}
+    EVENTS_BUCKET: ${self:service}-files-${self:provider.stage}
+    NOTIFICATIONS_QUEUE_URL: !Ref NotificationsQueue
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:TransactWriteItems
+            - dynamodb:DescribeStream
+            - dynamodb:GetRecords
+            - dynamodb:GetShardIterator
+            - dynamodb:ListStreams
+          Resource:
+            - !GetAtt UsersTable.Arn
+            - !GetAtt EventsTable.Arn
+            - !GetAtt RegistrationsTable.Arn
+            - !GetAtt AnalyticsTable.Arn
+            - !GetAtt NotificationsTable.Arn
+            - !Sub '${UsersTable.Arn}/index/*'
+            - !Sub '${EventsTable.Arn}/index/*'
+            - !Sub '${RegistrationsTable.Arn}/index/*'
+            - !Sub '${AnalyticsTable.Arn}/index/*'
+            - !Sub '${NotificationsTable.Arn}/index/*'
+            - !Sub '${UsersTable.Arn}/stream/*'
+            - !Sub '${EventsTable.Arn}/stream/*'
+            - !Sub '${RegistrationsTable.Arn}/stream/*'
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+          Resource:
+            - arn:aws:s3:::${self:provider.environment.EVENTS_BUCKET}/*
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - !GetAtt NotificationsQueue.Arn
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: '*'
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+    lambdaPort: 3002
+    noPrependStageInUrl: false
+functions:
+  # =============================================
+  # 1. AVTENTIKACIJA (Authentication)
+  # Dogodki: HTTP (uporabniški dogodki)
+  # =============================================
+
+  register:
+    handler: src/auth/register.handler
+    description: Registracija novega uporabnika
+    events:
+      - http:
+          path: /auth/register
+          method: POST
+          cors: true
+
+  login:
+    handler: src/auth/login.handler
+    description: Prijava obstoječega uporabnika
+    events:
+      - http:
+          path: /auth/login
+          method: POST
+          cors: true
+
+  authorize:
+    handler: src/auth/authorizer.handler
+    description: JWT Lambda authorizer
+
+  # =============================================
+  # 2. UPRAVLJANJE DOGODKOV (Event Management)
+  # Dogodki: HTTP + DynamoDB Streams (podatkovne spremembe)
+  # =============================================
+
+  createEvent:
+    handler: src/events/createEvent.handler
+    description: Ustvari nov dogodek
+    events:
+      - http:
+          path: /events
+          method: POST
+          cors: true
+          authorizer: authorize
+
+  listEvents:
+    handler: src/events/listEvents.handler
+    description: Seznam vseh aktivnih dogodkov
+    events:
+      - http:
+          path: /events
+          method: GET
+          cors: true
+
+  getEvent:
+    handler: src/events/getEvent.handler
+    description: Pridobi podrobnosti posameznega dogodka
+    events:
+      - http:
+          path: /events/{eventId}
+          method: GET
+          cors: true
+
+  updateEvent:
+    handler: src/events/updateEvent.handler
+    description: Posodobi obstoječi dogodek
+    events:
+      - http:
+          path: /events/{eventId}
+          method: PUT
+          cors: true
+          authorizer: authorize
+
+  deleteEvent:
+    handler: src/events/deleteEvent.handler
+    description: Zbriši dogodek (mehko brisanje)
+    events:
+      - http:
+          path: /events/{eventId}
+          method: DELETE
+          cors: true
+          authorizer: authorize
+
+  onEventCreated:
+    handler: src/events/onEventCreated.handler
+    description: Sprožilec ob ustvaritvi novega dogodka (DynamoDB Stream)
+    events:
+      - stream:
+          type: dynamodb
+          arn: !GetAtt EventsTable.StreamArn
+          batchSize: 5
+          startingPosition: LATEST
+          filterPatterns:
+            - eventName: [INSERT]
+
+  # =============================================
+  # 3. REGISTRACIJA NA DOGODKE (Event Registration)
+  # Dogodki: HTTP + DynamoDB Streams
+  # =============================================
+
+  registerForEvent:
+    handler: src/registrations/registerForEvent.handler
+    description: Registracija uporabnika na dogodek
+    events:
+      - http:
+          path: /events/{eventId}/register
+          method: POST
+          cors: true
+          authorizer: authorize
+
+  cancelRegistration:
+    handler: src/registrations/cancelRegistration.handler
+    description: Odpoved registracije
+    events:
+      - http:
+          path: /events/{eventId}/register/{registrationId}
+          method: DELETE
+          cors: true
+          authorizer: authorize
+
+  getRegistrations:
+    handler: src/registrations/getRegistrations.handler
+    description: Seznam prijavljenih udeležencev (samo organizator)
+    events:
+      - http:
+          path: /events/{eventId}/registrations
+          method: GET
+          cors: true
+          authorizer: authorize
+
+  getMyRegistrations:
+    handler: src/registrations/getMyRegistrations.handler
+    description: Moje registracije
+    events:
+      - http:
+          path: /my/registrations
+          method: GET
+          cors: true
+          authorizer: authorize
+
+  onRegistrationChanged:
+    handler: src/registrations/onRegistrationChanged.handler
+    description: Sprožilec ob spremembi registracije (DynamoDB Stream → SQS)
+    events:
+      - stream:
+          type: dynamodb
+          arn: !GetAtt RegistrationsTable.StreamArn
+          batchSize: 5
+          startingPosition: LATEST
+
+  # =============================================
+  # 4. OBVESTILA (Notifications)
+  # Dogodki: SQS (sporočila), Cron (časovni), DynamoDB Streams
+  # =============================================
+
+  sendWelcomeEmail:
+    handler: src/notifications/sendWelcomeEmail.handler
+    description: Pošlji pozdravno sporočilo ob registraciji (DynamoDB Stream)
+    events:
+      - stream:
+          type: dynamodb
+          arn: !GetAtt UsersTable.StreamArn
+          batchSize: 5
+          startingPosition: LATEST
+          filterPatterns:
+            - eventName: [INSERT]
+
+  processNotification:
+    handler: src/notifications/processNotification.handler
+    description: Obdelava obvestil iz SQS vrste (SQS sporočilo)
+    events:
+      - sqs:
+          arn: !GetAtt NotificationsQueue.Arn
+          batchSize: 10
+
+  sendReminder:
+    handler: src/notifications/sendReminder.handler
+    description: Dnevni opomnik za jutrišnje dogodke (Cron ob 8:00 UTC)
+    events:
+      - schedule:
+          rate: cron(0 8 * * ? *)
+          description: Pošlji opomnik za jutrišnje dogodke vsak dan ob 8:00 UTC
+          enabled: true
+
+  # =============================================
+  # 5. UPRAVLJANJE DATOTEK (File Management)
+  # Dogodki: HTTP + S3 (shramba in datoteke)
+  # =============================================
+
+  getPresignedUrl:
+    handler: src/files/getPresignedUrl.handler
+    description: Ustvari predpodpisani URL za nalaganje slik
+    events:
+      - http:
+          path: /files/presigned-url
+          method: GET
+          cors: true
+          authorizer: authorize
+
+  getFileUrl:
+    handler: src/files/getFileUrl.handler
+    description: Pridobi javni URL za sliko dogodka
+    events:
+      - http:
+          path: /files/{fileKey+}
+          method: GET
+          cors: true
+
+  onFileUploaded:
+    handler: src/files/onFileUploaded.handler
+    description: Obdelava naložene datoteke (S3 sprožilec)
+    events:
+      - s3:
+          bucket: ${self:provider.environment.EVENTS_BUCKET}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: events/
+
+  # =============================================
+  # 6. ANALITIKA IN NADZOR (Analytics & Monitoring)
+  # Dogodki: HTTP + Cron (časovni) + CloudWatch Logs (nadzorni)
+  # =============================================
+
+  trackView:
+    handler: src/analytics/trackView.handler
+    description: Beleži ogled dogodka
+    events:
+      - http:
+          path: /events/{eventId}/view
+          method: POST
+          cors: true
+
+  getEventStats:
+    handler: src/analytics/getEventStats.handler
+    description: Statistika ogledov posameznega dogodka
+    events:
+      - http:
+          path: /events/{eventId}/stats
+          method: GET
+          cors: true
+          authorizer: authorize
+
+  generateReport:
+    handler: src/analytics/generateReport.handler
+    description: Dnevno poročilo analitike (Cron ob polnoči)
+    events:
+      - schedule:
+          rate: cron(0 0 * * ? *)
+          description: Generiraj dnevno analitično poročilo vsak dan ob polnoči UTC
+          enabled: true
+
+  processLogs:
+    handler: src/analytics/processLogs.handler
+    description: Analiza napak iz CloudWatch Logs
+    events:
+      - cloudwatchLog:
+          logGroup: /aws/lambda/${self:service}-${self:provider.stage}-trackView
+          filter: 'ERROR'
+
+resources:
+  Resources:
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.USERS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: email-index
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    EventsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.EVENTS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: eventId
+            AttributeType: S
+          - AttributeName: organizerId
+            AttributeType: S
+          - AttributeName: date
+            AttributeType: S
+        KeySchema:
+          - AttributeName: eventId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: organizer-date-index
+            KeySchema:
+              - AttributeName: organizerId
+                KeyType: HASH
+              - AttributeName: date
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    RegistrationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.REGISTRATIONS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: registrationId
+            AttributeType: S
+          - AttributeName: eventId
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: registrationId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: event-user-index
+            KeySchema:
+              - AttributeName: eventId
+                KeyType: HASH
+              - AttributeName: userId
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - IndexName: user-index
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    AnalyticsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.ANALYTICS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: viewId
+            AttributeType: S
+          - AttributeName: eventId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: viewId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: event-views-index
+            KeySchema:
+              - AttributeName: eventId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    NotificationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.NOTIFICATIONS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: notificationId
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: notificationId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: user-notifications-index
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    NotificationsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-notifications-${self:provider.stage}
+        MessageRetentionPeriod: 86400
+        VisibilityTimeout: 60
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt NotificationsDLQ.Arn
+          maxReceiveCount: 3
+
+    NotificationsDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-notifications-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600
