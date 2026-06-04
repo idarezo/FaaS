@@ -55,8 +55,8 @@ export default function MyRegistrationsPage() {
                   {reg.eventTitle}
                 </Link>
                 <span className="reg-item-date">
-                  📅 {new Date(reg.eventDate).toLocaleDateString('sl-SI', { day: 'numeric', month: 'long', year: 'numeric' })}
-                  {reg.eventLocation && ` · 📍 ${reg.eventLocation}`}
+                  {new Date(reg.eventDate).toLocaleDateString('sl-SI', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  {reg.eventLocation && ` · ${reg.eventLocation}`}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -81,7 +81,7 @@ export default function MyRegistrationsPage() {
                 <div className="reg-item-info">
                   <span className="reg-item-title">{reg.eventTitle}</span>
                   <span className="reg-item-date">
-                    📅 {new Date(reg.eventDate).toLocaleDateString('sl-SI', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {new Date(reg.eventDate).toLocaleDateString('sl-SI', { day: 'numeric', month: 'long', year: 'numeric' })}
                   </span>
                 </div>
                 <span className="badge badge-gray">Odpovedana</span>

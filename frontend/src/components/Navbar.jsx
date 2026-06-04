@@ -26,7 +26,7 @@ export default function Navbar() {
               <NavLink to="/my-registrations" className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}>
                 Moje prijave
               </NavLink>
-              <span className="nav-user">👤 {user?.name}</span>
+              <span className="nav-user">{user?.name}</span>
               <button className="btn-nav-logout" onClick={handleLogout}>Odjava</button>
             </>
           ) : (

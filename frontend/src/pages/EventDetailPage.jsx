@@ -81,7 +81,7 @@ export default function EventDetailPage() {
   return (
     <div className="event-detail">
       <Link to="/events" className="btn btn-outline btn-sm" style={{ marginBottom: '1.5rem', display: 'inline-flex' }}>
-        ← Nazaj
+        Nazaj
       </Link>
 
       <div className="card">
@@ -98,15 +98,15 @@ export default function EventDetailPage() {
         <div className="event-detail-meta">
           <div className="event-detail-meta-item">
             <span className="label">Datum</span>
-            <span className="value">📅 {date}</span>
+            <span className="value">{date}</span>
           </div>
           <div className="event-detail-meta-item">
             <span className="label">Kraj</span>
-            <span className="value">📍 {event.location}</span>
+            <span className="value">{event.location}</span>
           </div>
           <div className="event-detail-meta-item">
             <span className="label">Prijavljeni</span>
-            <span className="value">👥 {event.currentRegistrations} / {event.maxCapacity}</span>
+            <span className="value">{event.currentRegistrations} / {event.maxCapacity}</span>
           </div>
         </div>
 
@@ -117,10 +117,18 @@ export default function EventDetailPage() {
         {error && <div className="alert alert-error">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
 
+        {!isLoggedIn && (
+          <div className="login-required-box">
+            <p>Za prijavo na dogodek se morate najprej prijaviti v sistem.</p>
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem' }}>
+              <Link to="/login" className="btn btn-primary btn-sm">Prijava</Link>
+              <Link to="/register" className="btn btn-outline btn-sm">Registracija</Link>
+            </div>
+          </div>
+        )}
+
         <div className="event-detail-actions">
-          {!isLoggedIn && (
-            <Link to="/login" className="btn btn-primary">Prijavi se za registracijo</Link>
-          )}
+          {false && null}
 
           {isLoggedIn && !isOrganizer && (
             myReg ? (
@@ -144,7 +152,7 @@ export default function EventDetailPage() {
 
         {myReg && (
           <p style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--success)' }}>
-            ✓ Prijavljeni ste na ta dogodek
+            Prijavljeni ste na ta dogodek.
           </p>
         )}
       </div>

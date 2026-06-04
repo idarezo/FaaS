@@ -14,14 +14,10 @@ export default function EventCard({ event }) {
         </span>
       </div>
       <div className="event-card-meta">
-        <span>📅 {date}</span>
-        <span>📍 {event.location}</span>
+        <span><strong>Datum:</strong> {date}</span>
+        <span><strong>Mesto:</strong> {event.location}</span>
+        {event.description && <span><strong>Opis:</strong> {event.description.length > 60 ? event.description.slice(0, 60) + '…' : event.description}</span>}
       </div>
-      {event.description && (
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          {event.description.length > 80 ? event.description.slice(0, 80) + '…' : event.description}
-        </p>
-      )}
       <div className="event-card-footer">
         <span className={`badge badge-blue`}>{event.category}</span>
         <div className="capacity">
